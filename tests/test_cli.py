@@ -22,7 +22,12 @@ from tau_coding.provider_config import (
 from tau_coding.rendering import PrintOutputMode
 from tau_coding.resources import TauResourcePaths
 from tau_coding.skills import load_skills
-from tau_coding.system_prompt import BuildSystemPromptOptions, build_system_prompt
+from tau_coding.system_prompt import (
+    BuildSystemPromptOptions,
+    build_system_prompt,
+    build_system_prompt_inspection,
+    format_system_prompt_inspection,
+)
 from tau_coding.tools import create_coding_tools
 from tau_coding.update_check import (
     ReleaseNoteSection,
@@ -758,7 +763,7 @@ async def test_run_print_mode_system_command_prints_prompt_without_provider_call
     )
 
     captured = capsys.readouterr()
-    expected_system = build_system_prompt(
+    inspection = build_system_prompt_inspection(
         BuildSystemPromptOptions(
             cwd=tmp_path,
             tools=create_coding_tools(cwd=tmp_path),
@@ -766,7 +771,7 @@ async def test_run_print_mode_system_command_prints_prompt_without_provider_call
         )
     )
     assert ok is True
-    assert captured.out == f"{expected_system}\n"
+    assert captured.out == f"{format_system_prompt_inspection(inspection)}\n"
     assert captured.err == ""
     assert provider.calls == []
     assert await storage.read_all() == []
@@ -852,7 +857,7 @@ async def test_run_print_mode_persists_session_entries(
     assert [message.role for message in messages] == ["user", "assistant"]
     assert messages[0].content == "Say hello"
     assert messages[1].text == "Done"
-    assert any(entry.type == "leaf" for entry in entries)
+    assert not any(entry.type == "leaf" for entry in entries)
 
 
 @pytest.mark.anyio
@@ -860,9 +865,14 @@ async def test_run_print_mode_resumes_persisted_conversation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     storage = JsonlSessionStorage(tmp_path / "session.jsonl")
-    await storage.append(MessageEntry(message=UserMessage(content="First question")))
-    await storage.append(MessageEntry(message=AssistantMessage(content="First answer")))
-    await storage.append(ModelChangeEntry(model="model-a"))
+    user_entry = MessageEntry(message=UserMessage(content="First question"))
+    assistant_entry = MessageEntry(
+        parent_id=user_entry.id,
+        message=AssistantMessage(content="First answer"),
+    )
+    await storage.append(user_entry)
+    await storage.append(assistant_entry)
+    await storage.append(ModelChangeEntry(parent_id=assistant_entry.id, model="model-a"))
     provider = FakeProvider(
         [
             [
